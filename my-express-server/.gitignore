@@ -1,0 +1,16 @@
+node_modules/
+
+.env
+
+*.log
+*.tmp
+
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+.DS_Store
+Thumbs.db
