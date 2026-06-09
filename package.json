@@ -1,6 +1,26 @@
 {
   "dependencies": {
+    "bcrypt": "^5.1.1",
     "express": "^5.2.1",
+    "express-session": "^1.19.0",
     "pg": "^8.21.0"
-  }
+  },
+  "name": "practice",
+  "version": "1.0.0",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Gagaktus/Practice.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Gagaktus/Practice/issues"
+  },
+  "homepage": "https://github.com/Gagaktus/Practice#readme",
+  "description": ""
 }

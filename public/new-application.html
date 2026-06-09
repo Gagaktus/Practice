@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>Новая заявка - Пассажирам.РФ</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link rel="stylesheet" href="/css/style.css">
+    <style>
+        .wide-form {
+            max-width: 700px;
+            margin: 50px auto;
+        }
+        @media (min-width: 768px) {
+            .wide-form {
+                max-width: 800px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container wide-form">
+        <div class="card p-4">
+            <h3 class="text-center mb-4"><i class="fas fa-pen-alt me-2"></i>Оформление заявки</h3>
+            <form id="applicationForm">
+                <div class="mb-3">
+                    <label><i class="fas fa-truck-moving me-2"></i>Вид транспорта</label>
+                    <select id="transportId" class="form-select" required>
+                        <option value="">-- Выберите --</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label><i class="fas fa-calendar-alt me-2"></i>Дата начала занятий (ДД.ММ.ГГГГ)</label>
+                    <input type="text" id="lessonDate" class="form-control" placeholder="ДД.ММ.ГГГГ" required>
+                </div>
+                <div class="mb-3">
+                    <label><i class="fas fa-credit-card me-2"></i>Способ оплаты</label>
+                    <select id="paymentMethod" class="form-select" required>
+                        <option value="Наличные">Наличные</option>
+                        <option value="Карта">Карта</option>
+                        <option value="Онлайн">Онлайн</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-primary w-100"><i class="fas fa-paper-plane"></i> Отправить заявку</button>
+                <a href="/dashboard.html" class="btn btn-secondary w-100 mt-2"><i class="fas fa-arrow-left"></i> Назад</a>
+            </form>
+        </div>
+    </div>
+    <script src="/js/main.js"></script>
+    <script>
+        async function loadTransport() {
+            const res = await fetch('/api/transport');
+            const transports = await res.json();
+            const select = document.getElementById('transportId');
+            select.innerHTML = '<option value="">-- Выберите --</option>' + transports.map(t => `<option value="${t.id}">${t.transport}</option>`).join('');
+        }
+        document.getElementById('applicationForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const transport_id = document.getElementById('transportId').value;
+            const dateStr = document.getElementById('lessonDate').value;
+            const payment_method = document.getElementById('paymentMethod').value;
+            if (!transport_id) return showToast('Выберите вид транспорта', 'error');
+            if (!dateStr) return showToast('Введите дату', 'error');
+            const parts = dateStr.split('.');
+            if (parts.length !== 3) return showToast('Неверный формат даты. Используйте ДД.ММ.ГГГГ', 'error');
+            const day = parts[0].padStart(2,'0');
+            const month = parts[1].padStart(2,'0');
+            let year = parts[2];
+            if (year.length === 2) year = '20' + year;
+            const isoDate = `${year}-${month}-${day}`;
+            if (isNaN(new Date(isoDate).getTime())) return showToast('Некорректная дата', 'error');
+            const res = await fetch('/api/applications', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ transport_id, date: isoDate, payment_method })
+            });
+            if (res.ok) {
+                showToast('Заявка успешно создана!', 'success');
+                window.location.href = '/dashboard.html';
+            } else {
+                const err = await res.json();
+                showToast(err.error || 'Ошибка создания заявки', 'error');
+            }
+        });
+        loadTransport();
+        setDateMask();
+    </script>
+</body>
+</html>

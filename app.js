@@ -1,275 +1,256 @@
-// app.js – полный код, адаптированный для работы с db.js
 const express = require('express');
-const db = require('./db'); // подключаем ваш пул PostgreSQL из db.js
+const session = require('express-session');
+const bcrypt = require('bcrypt');
+const { Pool } = require('pg');
+const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+const pool = new Pool({
+    user: 'postgres',
+    password: '12345',
+    host: 'localhost',
+    port: 5432,
+    database: 'Melnik'
+});
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(express.static(path.join(__dirname, 'public')));
+app.use(session({
+    secret: 'секретный_ключ_экзамен',
+    resave: false,
+    saveUninitialized: false,
+    cookie: { maxAge: 3600000 }
+}));
 
-// ----- Инициализация таблиц (если их нет) и начальных данных -----
-const initDatabase = async () => {
+const initDB = async () => {
     try {
-        // Таблица transport
-        await db.query(`
-            CREATE TABLE IF NOT EXISTS transport (
+        await pool.query(`
+            DROP TABLE IF EXISTS reviews CASCADE;
+            DROP TABLE IF EXISTS applications CASCADE;
+            DROP TABLE IF EXISTS users CASCADE;
+            DROP TABLE IF EXISTS transport CASCADE;
+            DROP TABLE IF EXISTS Role CASCADE;
+        `);
+
+        await pool.query(`
+            CREATE TABLE transport (
                 id SERIAL PRIMARY KEY,
                 transport VARCHAR(100)
-            )
-        `);
-        // Таблица Role
-        await db.query(`
-            CREATE TABLE IF NOT EXISTS Role (
+            );
+            CREATE TABLE Role (
                 id SERIAL PRIMARY KEY,
                 name VARCHAR(50)
-            )
-        `);
-        // Таблица users
-        await db.query(`
-            CREATE TABLE IF NOT EXISTS users (
+            );
+            CREATE TABLE users (
                 id SERIAL PRIMARY KEY,
-                Role_id INTEGER,
-                password VARCHAR(100),
+                Role_id INTEGER REFERENCES Role(id),
+                password VARCHAR(255),
                 login VARCHAR(100) UNIQUE,
                 Full_name VARCHAR(100),
                 Registration_Date DATE,
                 Date_of_birth DATE,
-                mail VARCHAR(100)
-            )
-        `);
-        // Таблица applications
-        await db.query(`
-            CREATE TABLE IF NOT EXISTS applications (
-                course_id INTEGER PRIMARY KEY,
+                mail VARCHAR(100),
+                phone VARCHAR(20)
+            );
+            CREATE TABLE applications (
+                course_id SERIAL PRIMARY KEY,
                 user_id INTEGER REFERENCES users(id),
-                status VARCHAR(100),
+                status VARCHAR(50) DEFAULT 'Новая',
                 time_of_lessons DATE,
                 payment_method VARCHAR(100),
-                transport_id INTEGER REFERENCES transport(id)
-            )
+                transport_id INTEGER REFERENCES transport(id),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                review TEXT,
+                review_date TIMESTAMP
+            );
+            CREATE TABLE reviews (
+                id SERIAL PRIMARY KEY,
+                application_id INTEGER REFERENCES applications(course_id) ON DELETE CASCADE,
+                user_id INTEGER REFERENCES users(id),
+                review_text TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
         `);
 
-        // Проверяем, есть ли данные в transport
-        const transportRes = await db.query('SELECT COUNT(*) FROM transport');
-        if (parseInt(transportRes.rows[0].count) === 0) {
-            // Начальные данные
-            await db.query(`
-                INSERT INTO transport (id, transport) VALUES
-                (1, 'Автобус'), (2, 'Электробус'), (3, 'Трамвай')
-            `);
-            await db.query(`
-                INSERT INTO Role (id, name) VALUES
-                (1, 'Ученик'), (2, 'Преподаватель'), (3, 'Администратор')
-            `);
-            await db.query(`
-                INSERT INTO users (id, Role_id, password, login, Full_name, Registration_Date, Date_of_birth, mail) VALUES
-                (1, (SELECT id FROM Role WHERE name = 'Ученик'), 'pass123', 'ivanov_ia', 'Иванов Иван Алексеевич', '2024-01-15', '1990-05-20', 'ivanov@example.com'),
-                (2, (SELECT id FROM Role WHERE name = 'Преподаватель'), 'qwerty', 'petrova_ev', 'Петрова Елена Владимировна', '2024-02-10', '1985-11-02', 'petrova@example.com'),
-                (3, (SELECT id FROM Role WHERE name = 'Администратор'), '123456', 'sidorov_dp', 'Сидоров Дмитрий Павлович', '2024-03-01', '2001-07-14', 'sidorov@example.com')
-            `);
-            await db.query(`
-                INSERT INTO applications (course_id, user_id, status, time_of_lessons, payment_method, transport_id) VALUES
-                (101, (SELECT id FROM users WHERE login = 'ivanov_ia'), 'Новый', '2024-09-10', 'Наличные', (SELECT id FROM transport WHERE transport = 'Автобус')),
-                (102, (SELECT id FROM users WHERE login = 'petrova_ev'), 'В процессе', '2024-08-25', 'Карта', (SELECT id FROM transport WHERE transport = 'Электробус')),
-                (103, (SELECT id FROM users WHERE login = 'sidorov_dp'), 'Закончил', '2024-10-05', 'карта', (SELECT id FROM transport WHERE transport = 'Трамвай'))
-            `);
-            console.log('Начальные данные добавлены');
+        const transportCount = await pool.query('SELECT COUNT(*) FROM transport');
+        if (parseInt(transportCount.rows[0].count) === 0) {
+            await pool.query(`INSERT INTO transport (transport) VALUES ('Автобус'), ('Электробус'), ('Трамвай')`);
         }
-        console.log('База данных инициализирована');
+
+        const roleCount = await pool.query('SELECT COUNT(*) FROM Role');
+        if (parseInt(roleCount.rows[0].count) === 0) {
+            await pool.query(`INSERT INTO Role (name) VALUES ('Ученик'), ('Преподаватель'), ('Администратор')`);
+        }
+
+        const users = await pool.query('SELECT id, password FROM users WHERE LENGTH(password) < 60 AND password NOT LIKE \'$2b$%\'');
+        for (const user of users.rows) {
+            const hashed = await bcrypt.hash(user.password, 10);
+            await pool.query('UPDATE users SET password = $1 WHERE id = $2', [hashed, user.id]);
+            console.log(`Обновлён пароль для пользователя ID ${user.id}`);
+        }
+
+        const userCount = await pool.query('SELECT COUNT(*) FROM users');
+        if (parseInt(userCount.rows[0].count) === 0) {
+            const hashed = await bcrypt.hash('password123', 10);
+            await pool.query(`
+                INSERT INTO users (Role_id, password, login, Full_name, Registration_Date, Date_of_birth, mail, phone)
+                VALUES ((SELECT id FROM Role WHERE name='Ученик'), $1, 'testuser', 'Тестовый Пользователь', CURRENT_DATE, '1990-01-01', 'test@example.com', '+71234567890')
+            `, [hashed]);
+            console.log('Создан тестовый пользователь: login=testuser, password=password123');
+        }
+
+        console.log('База данных успешно инициализирована');
     } catch (err) {
         console.error('Ошибка инициализации БД:', err);
         process.exit(1);
     }
 };
 
-// ----- Запуск инициализации, затем сервера -----
-initDatabase().then(() => {
-    // ----- ГЛАВНАЯ СТРАНИЦА – ТОЛЬКО ФОРМА РЕГИСТРАЦИИ -----
-    app.get('/', (req, res) => {
-        res.send(`
-            <!DOCTYPE html>
-            <html>
-            <head><title>Регистрация</title><meta charset="utf-8">
-            <style>
-                body{font-family:Arial;margin:40px}
-                label{width:150px;display:inline-block;margin-top:10px}
-                input,select{margin-top:10px;padding:5px;width:250px}
-                button{margin-top:20px;padding:8px 20px;background:#4CAF50;color:white;border:none;cursor:pointer}
-            </style>
-            </head>
-            <body>
-                <h2>Регистрация нового пользователя</h2>
-                <form action="/register" method="POST">
-                    <label>Логин (login):</label> <input type="text" name="login" required><br>
-                    <label>Пароль (password):</label> <input type="password" name="password" required><br>
-                    <label>Полное имя (Full_name):</label> <input type="text" name="Full_name" required><br>
-                    <label>Дата рождения (Date_of_birth):</label> <input type="date" name="Date_of_birth" required><br>
-                    <label>Email (mail):</label> <input type="email" name="mail" required><br>
-                    <label>Роль (Role):</label>
-                    <select name="Role_id">
-                        <option value="1">Ученик</option>
-                        <option value="2">Преподаватель</option>
-                        <option value="3">Администратор</option>
-                    </select><br>
-                    <button type="submit">Зарегистрироваться</button>
-                </form>
-            </body>
-            </html>
-        `);
-    });
+const isValidLogin = (login) => /^[a-zA-Z0-9]{6,}$/.test(login);
+const isValidPassword = (pwd) => pwd && pwd.length >= 8;
 
-    // ----- ОБРАБОТКА ФОРМЫ РЕГИСТРАЦИИ -----
-    app.post('/register', async (req, res) => {
-        const { login, password, Full_name, Date_of_birth, mail, Role_id } = req.body;
-        if (!login || !password || !Full_name || !Date_of_birth || !mail) {
-            return res.status(400).send('Все поля обязательны.');
-        }
-        const today = new Date().toISOString().slice(0, 10);
-        const sql = `
-            INSERT INTO users (Role_id, password, login, Full_name, Registration_Date, Date_of_birth, mail)
-            VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id
-        `;
-        const params = [Role_id || 1, password, login, Full_name, today, Date_of_birth, mail];
-        try {
-            const result = await db.query(sql, params);
-            const newId = result.rows[0].id;
-            res.send(`
-                <h2>Регистрация успешна!</h2>
-                <p>Пользователь ${Full_name} добавлен с ID = ${newId}.</p>
-                <p><a href="/">Зарегистрировать ещё</a></p>
-            `);
-        } catch (err) {
-            console.error(err);
-            if (err.constraint === 'users_login_key') {
-                return res.status(409).send('Логин уже существует.');
-            }
-            return res.status(500).send('Ошибка БД: ' + err.message);
-        }
-    });
-
-    // ----- ДОПОЛНИТЕЛЬНЫЕ МАРШРУТЫ (ВЫВОД ДАННЫХ) -----
-    // 1. JSON endpoints
-    app.get('/users', async (req, res) => {
-        try {
-            const result = await db.query('SELECT * FROM users');
-            res.json(result.rows);
-        } catch (err) {
-            res.status(500).json({ error: err.message });
-        }
-    });
-
-    app.get('/applications', async (req, res) => {
-        try {
-            const sql = `
-                SELECT a.*, u.Full_name AS user_name, t.transport AS transport_name
-                FROM applications a
-                LEFT JOIN users u ON a.user_id = u.id
-                LEFT JOIN transport t ON a.transport_id = t.id
-            `;
-            const result = await db.query(sql);
-            res.json(result.rows);
-        } catch (err) {
-            res.status(500).json({ error: err.message });
-        }
-    });
-
-    app.get('/transport', async (req, res) => {
-        try {
-            const result = await db.query('SELECT * FROM transport');
-            res.json(result.rows);
-        } catch (err) {
-            res.status(500).json({ error: err.message });
-        }
-    });
-
-    app.get('/roles', async (req, res) => {
-        try {
-            const result = await db.query('SELECT * FROM Role');
-            res.json(result.rows);
-        } catch (err) {
-            res.status(500).json({ error: err.message });
-        }
-    });
-
-    // 2. HTML-таблицы
-    app.get('/html/users', async (req, res) => {
-        try {
-            const result = await db.query('SELECT * FROM users');
-            let html = '<!DOCTYPE html><html><head><title>Пользователи</title><style>table,th,td{border:1px solid #ccc;border-collapse:collapse;padding:8px;}</style></head><body><h1>Пользователи</h1><table>';
-            html += '<tr><th>ID</th><th>Role_id</th><th>Логин</th><th>ФИО</th><th>Дата рег.</th><th>Дата рожд.</th><th>Email</th></tr>';
-            result.rows.forEach(row => {
-                html += `<tr>
-                            <td>${row.id}</td>
-                            <td>${row.Role_id}</td>
-                            <td>${row.login}</td>
-                            <td>${row.Full_name}</td>
-                            <td>${row.Registration_Date}</td>
-                            <td>${row.Date_of_birth}</td>
-                            <td>${row.mail}</td>
-                        </tr>`;
-            });
-            html += '</table></body></html>';
-            res.send(html);
-        } catch (err) {
-            res.status(500).send(err.message);
-        }
-    });
-
-    app.get('/html/applications', async (req, res) => {
-        try {
-            const sql = `
-                SELECT a.course_id, a.status, a.time_of_lessons, a.payment_method,
-                       u.Full_name AS user_name, t.transport AS transport_name
-                FROM applications a
-                LEFT JOIN users u ON a.user_id = u.id
-                LEFT JOIN transport t ON a.transport_id = t.id
-            `;
-            const result = await db.query(sql);
-            let html = '<!DOCTYPE html><html><head><title>Заявки</title><style>table,th,td{border:1px solid #ccc;border-collapse:collapse;padding:8px;}</style></head><body><h1>Заявки</h1><table>';
-            html += '<tr><th>Курс ID</th><th>Статус</th><th>Время занятий</th><th>Оплата</th><th>Пользователь</th><th>Транспорт</th></tr>';
-            result.rows.forEach(row => {
-                html += `<tr>
-                            <td>${row.course_id}</td>
-                            <td>${row.status}</td>
-                            <td>${row.time_of_lessons}</td>
-                            <td>${row.payment_method}</td>
-                            <td>${row.user_name}</td>
-                            <td>${row.transport_name}</td>
-                        </tr>`;
-            });
-            html += '</table></body></html>';
-            res.send(html);
-        } catch (err) {
-            res.status(500).send(err.message);
-        }
-    });
-
-    // 3. Все данные текстом (разделены пустыми строками)
-    app.get('/alldata', async (req, res) => {
-        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-        try {
-            const transport = (await db.query('SELECT * FROM transport')).rows;
-            const roles     = (await db.query('SELECT * FROM Role')).rows;
-            const users     = (await db.query('SELECT * FROM users')).rows;
-            const apps      = (await db.query('SELECT * FROM applications')).rows;
-
-            let out = '';
-            out += '=== Transport ===\n'; transport.forEach(r => out += `${r.id} ${r.transport}\n`);
-            out += '\n=== Role ===\n'; roles.forEach(r => out += `${r.id} ${r.name}\n`);
-            out += '\n=== Users ===\n'; users.forEach(r => out += `${r.id} ${r.Role_id} ${r.login} ${r.Full_name} ${r.Registration_Date} ${r.Date_of_birth} ${r.mail}\n`);
-            out += '\n=== Applications ===\n'; apps.forEach(r => out += `${r.course_id} ${r.user_id} ${r.status} ${r.time_of_lessons} ${r.payment_method} ${r.transport_id}\n`);
-            res.send(out);
-        } catch (err) {
-            res.status(500).send(`Ошибка: ${err.message}`);
-        }
-    });
-
-    // ----- ЗАПУСК СЕРВЕРА -----
-    app.listen(PORT, () => {
-        console.log(`Сервер запущен на http://localhost:${PORT}`);
-    });
-}).catch(err => {
-    console.error('Не удалось инициализировать БД:', err);
-    process.exit(1);
+app.get('/api/user', async (req, res) => {
+    if (!req.session.user) return res.status(401).json({ error: 'Не авторизован' });
+    res.json({ id: req.session.user.id, login: req.session.user.login, full_name: req.session.user.full_name });
 });
+
+app.get('/api/user/applications', async (req, res) => {
+    if (!req.session.user) return res.status(401).json({ error: 'Не авторизован' });
+    const result = await pool.query(`
+        SELECT a.*, t.transport as transport_name 
+        FROM applications a
+        JOIN transport t ON a.transport_id = t.id
+        WHERE a.user_id = $1
+        ORDER BY a.created_at DESC
+    `, [req.session.user.id]);
+    res.json(result.rows);
+});
+
+app.post('/api/applications', async (req, res) => {
+    if (!req.session.user) return res.status(401).json({ error: 'Не авторизован' });
+    const { transport_id, date, payment_method } = req.body;
+    try {
+        const result = await pool.query(`
+            INSERT INTO applications (user_id, transport_id, time_of_lessons, payment_method, status)
+            VALUES ($1, $2, $3, $4, 'Новая')
+            RETURNING course_id
+        `, [req.session.user.id, transport_id, date, payment_method]);
+        res.json({ success: true, course_id: result.rows[0].course_id });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/reviews', async (req, res) => {
+    if (!req.session.user) return res.status(401).json({ error: 'Не авторизован' });
+    const { application_id, review_text } = req.body;
+
+    const check = await pool.query(`
+        SELECT status FROM applications 
+        WHERE course_id = $1 AND user_id = $2
+    `, [application_id, req.session.user.id]);
+    if (check.rowCount === 0) return res.status(404).json({ error: 'Заявка не найдена' });
+    if (check.rows[0].status !== 'Обучение завершено') {
+        return res.status(400).json({ error: 'Отзыв можно оставить только после завершения обучения' });
+    }
+
+    const existing = await pool.query(`SELECT id FROM reviews WHERE application_id = $1`, [application_id]);
+    if (existing.rowCount > 0) return res.status(400).json({ error: 'Отзыв уже был оставлен' });
+
+    await pool.query(`INSERT INTO reviews (application_id, user_id, review_text) VALUES ($1, $2, $3)`,
+        [application_id, req.session.user.id, review_text]);
+    await pool.query(`UPDATE applications SET review = $1, review_date = CURRENT_TIMESTAMP WHERE course_id = $2`,
+        [review_text, application_id]);
+    res.json({ success: true });
+});
+
+app.get('/api/transport', async (req, res) => {
+    const result = await pool.query('SELECT id, transport FROM transport');
+    res.json(result.rows);
+});
+
+app.get('/api/admin/applications', async (req, res) => {
+    if (!req.session.isAdmin) return res.status(403).json({ error: 'Доступ запрещён' });
+    const { status, sort = 'created_at', order = 'DESC', page = 1, limit = 5 } = req.query;
+    const offset = (page - 1) * limit;
+    let whereClause = '', params = [];
+    if (status) { whereClause = 'WHERE a.status = $1'; params.push(status); }
+    const orderClause = `ORDER BY a.${sort} ${order.toUpperCase()}`;
+    const countRes = await pool.query(`SELECT COUNT(*) FROM applications a ${whereClause}`, params);
+    const total = parseInt(countRes.rows[0].count);
+    const dataRes = await pool.query(`
+        SELECT a.*, u.full_name as user_name, t.transport as transport_name
+        FROM applications a
+        JOIN users u ON a.user_id = u.id
+        JOIN transport t ON a.transport_id = t.id
+        ${whereClause}
+        ${orderClause}
+        LIMIT $${params.length+1} OFFSET $${params.length+2}
+    `, [...params, limit, offset]);
+    res.json({ applications: dataRes.rows, total, page: parseInt(page), totalPages: Math.ceil(total/limit) });
+});
+
+app.put('/api/admin/applications/:id/status', async (req, res) => {
+    if (!req.session.isAdmin) return res.status(403).json({ error: 'Доступ запрещён' });
+    const { id } = req.params;
+    const { status } = req.body;
+    await pool.query(`UPDATE applications SET status = $1 WHERE course_id = $2`, [status, id]);
+    res.json({ success: true });
+});
+
+app.post('/login', async (req, res) => {
+    const { login, password } = req.body;
+    try {
+        const result = await pool.query(`SELECT * FROM users WHERE login = $1`, [login]);
+        if (result.rowCount === 0) return res.status(401).json({ error: 'Неверный логин или пароль' });
+        const user = result.rows[0];
+        const match = await bcrypt.compare(password, user.password);
+        if (!match) return res.status(401).json({ error: 'Неверный логин или пароль' });
+        req.session.user = { id: user.id, login: user.login, full_name: user.full_name, role_id: user.role_id };
+        res.json({ success: true });
+    } catch (err) { 
+        console.error(err);
+        res.status(500).json({ error: 'Ошибка сервера' }); 
+    }
+});
+
+app.post('/register', async (req, res) => {
+    const { login, password, full_name, birth_date, email, phone } = req.body;
+    if (!isValidLogin(login)) return res.status(400).json({ error: 'Неверный формат логина (мин 6 латиница+цифры)' });
+    if (!isValidPassword(password)) return res.status(400).json({ error: 'Пароль должен быть не менее 8 символов' });
+    const unique = await pool.query('SELECT id FROM users WHERE login=$1', [login]);
+    if (unique.rowCount > 0) return res.status(409).json({ error: 'Логин уже занят' });
+    const hashed = await bcrypt.hash(password, 10);
+    try {
+        await pool.query(`
+            INSERT INTO users (Role_id, password, login, Full_name, Registration_Date, Date_of_birth, mail, phone)
+            VALUES ((SELECT id FROM Role WHERE name='Ученик'), $1, $2, $3, CURRENT_DATE, $4, $5, $6)
+        `, [hashed, login, full_name, birth_date, email, phone]);
+        res.json({ success: true });
+    } catch (err) { 
+        console.error(err);
+        res.status(500).json({ error: 'Ошибка БД при регистрации' }); 
+    }
+});
+
+app.post('/admin/login', (req, res) => {
+    const { login, password } = req.body;
+    if (login === 'Admin26' && password === 'Demo20') {
+        req.session.isAdmin = true;
+        res.json({ success: true });
+    } else {
+        res.status(401).json({ error: 'Неверные учётные данные' });
+    }
+});
+
+app.get('/logout', (req, res) => { req.session.destroy(); res.redirect('/login.html'); });
+app.get('/admin/logout', (req, res) => { req.session.destroy(); res.redirect('/admin-login.html'); });
+app.get('/', (req, res) => res.redirect('/login.html'));
+
+initDB().then(() => {
+    app.listen(PORT, () => console.log(`Сервер запущен: http://localhost:${PORT}`));
+}).catch(err => console.error(err)); 
