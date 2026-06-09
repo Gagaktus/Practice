@@ -27,12 +27,25 @@
         .save-status {
             margin-left: 8px;
         }
+        /* Эмблема в navbar */
+        .navbar-brand img {
+            height: 40px;
+            width: auto;
+            display: block;
+        }
+        /* Убираем возможные отступы у navbar-brand */
+        .navbar-brand {
+            padding: 0;
+        }
     </style>
 </head>
 <body>
     <nav class="navbar navbar-dark bg-dark">
         <div class="container">
-            <span class="navbar-brand"><i class="fas fa-tachometer-alt me-2"></i>Панель администратора</span>
+            <!-- Эмблема вместо текста -->
+            <a class="navbar-brand" href="#">
+                <img src="/images/image05.jpg" alt="Эмблема администратора">
+            </a>
             <button onclick="adminLogout()" class="btn btn-outline-light"><i class="fas fa-sign-out-alt"></i> Выйти</button>
         </div>
     </nav>
@@ -63,20 +76,20 @@
             let html = '<div class="table-responsive"><table class="table table-bordered"><thead><tr><th>№</th><th>Пользователь</th><th>Транспорт</th><th>Дата занятий</th><th>Оплата</th><th>Статус</th></tr></thead><tbody>';
             apps.forEach(app => {
                 html += `<tr>
-                             <td>${app.course_id}</td>
-                             <td>${app.user_name}</td>
-                             <td>${app.transport_name}</td>
-                             <td>${new Date(app.time_of_lessons).toLocaleDateString()}</td>
-                             <td>${app.payment_method}</td>
-                             <td>
+                              <td>${app.course_id}</td>
+                              <td>${app.user_name}</td>
+                              <td>${app.transport_name}</td>
+                              <td>${new Date(app.time_of_lessons).toLocaleDateString()}</td>
+                              <td>${app.payment_method}</td>
+                              <td>
                                 <select class="status-select form-select form-select-sm" data-id="${app.course_id}">
                                     <option value="Новая" ${app.status === 'Новая' ? 'selected' : ''}>Новая</option>
                                     <option value="Идет обучение" ${app.status === 'Идет обучение' ? 'selected' : ''}>Идет обучение</option>
                                     <option value="Обучение завершено" ${app.status === 'Обучение завершено' ? 'selected' : ''}>Обучение завершено</option>
                                 </select>
                                 <button class="btn btn-sm btn-primary save-status mt-1" data-id="${app.course_id}"><i class="fas fa-save"></i> Сохранить</button>
-                             </td>
-                          </tr>`;
+                              </td>
+                           </tr>`;
             });
             html += '</tbody></table></div>';
             container.innerHTML = html;
